@@ -1,15 +1,8 @@
 function import_data(geo, start_year, end_year)
     conn = DBInterface.connect(DuckDB.DB)
-    all_years = collect(start_year:end_year)
-
     number_years = end_year - start_year + 1;
     number_quarters = number_years * 4;
-    years_str = join(["'$(year)'" for year in all_years], ", ")
-    ## Create a year-quarter vector and string for creating a data.frame and for SQL
-    ## queries
-    all_quarters = ["Q1", "Q2", "Q3", "Q4"]
-    quarters_vec = ["$(year)-$(quarter)" for year in all_years for quarter in all_quarters]
-    quarters_str = join(["'$(yearquarter)'" for yearquarter in quarters_vec], ",")
+    years_str, quarters_str = sql_years_quarters(start_year:end_year)
 
     data = Dict()
 

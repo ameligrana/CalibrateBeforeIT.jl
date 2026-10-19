@@ -12,8 +12,7 @@ function import_figaro_data(geo,
                             number_sectors)
     conn = DBInterface.connect(DuckDB.DB)
     number_years = end_calibration_year - start_calibration_year + 1;
-    all_years = collect(start_calibration_year:end_calibration_year)
-    years_str = join(["'$(year)'" for year in all_years], ", ")
+    years_str = sql_list(start_calibration_year:end_calibration_year)
 
     figaro = Dict()
 

@@ -31,26 +31,26 @@ function execute_debug(conn, query::String)::DataFrame
     return res
 end
 
-function extract_years(conn, table_id::String, start_calibration_year::Int64, end_calibration_year::Int64)::Vector{Int64}
+function extract_years(conn, table_id::String,
+                       start_year::Int64 = typemin(Int64),
+                       end_year::Int64 = typemax(Int64))::Vector{Int64}
     sqlquery = "SELECT DISTINCT time FROM '$(pqfile(table_id))' ORDER BY time"
     res_years = try
         parse.(Int64, execute(conn, sqlquery))
     catch e
         error("Failed to parse years from the database: $e")
     end
-    filter!(x -> x >= start_calibration_year && x <= end_calibration_year, res_years)
+    filter!(x -> x >= start_year && x <= end_year, res_years)
     return res_years
 end
 
-function extract_years(conn, table_id::String, start_calibration_year::Int64)::Vector{Int64}
-    extract_years(conn, table_id, start_calibration_year, typemax(Int64))
-end
+# Quoted, comma-separated list for SQL `IN (...)` clauses
+sql_list(items)::String = join(["'$(item)'" for item in items], ", ")
 
-function extract_years(conn, table_id::String)::Vector{Int64}
-    extract_years(conn, table_id, typemin(Int64), typemax(Int64))
-end
-
-create_year_array_str(all_years::Vector)::String = join(["'$(year)'" for year in all_years], ", ")
+# SQL lists of the years and of the year-quarters ("2010-Q1") in `years`, as
+# found in the `time` column of annual and quarterly Eurostat tables
+sql_years_quarters(years::UnitRange{Int64}) =
+    (sql_list(years), sql_list(["$(year)-Q$(quarter)" for year in years for quarter in 1:4]))
 
 # Interpolation utilities
 function linear_interp_extrap(x, y, xi)::Vector

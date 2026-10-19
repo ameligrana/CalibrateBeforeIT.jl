@@ -2,15 +2,9 @@ function import_calibration_data(geo, start_calibration_year, end_calibration_ye
                                  number_sectors, figaro)
     conn = DBInterface.connect(DuckDB.DB)
 
-    all_years = collect(start_calibration_year:end_calibration_year)
     number_years=end_calibration_year-start_calibration_year + 1;
     number_quarters=number_years*4;
-    ## Create a year-quarter vector and string for creating a data.frame and for SQL
-    ## queries
-    years_str = create_year_array_str(all_years)
-    all_quarters = ["Q1", "Q2", "Q3", "Q4"]
-    quarters_vec = ["$(year)-$(quarter)" for year in all_years for quarter in all_quarters]
-    quarters_str = create_year_array_str(quarters_vec)
+    years_str, quarters_str = sql_years_quarters(start_calibration_year:end_calibration_year)
 
     calibration_data = Dict()
 
@@ -269,14 +263,14 @@ function import_calibration_data(geo, start_calibration_year, end_calibration_ye
     # Create variable `sbs_na_sca_r2_years_str` that only contains those years
     # that are not in sbs_ovw_act
     sbs_na_sca_r2_years = setdiff(sbs_na_sca_r2_years, sbs_ovw_act_years)
-    sbs_ovw_act_years_str = create_year_array_str(sbs_ovw_act_years)
-    sbs_na_sca_r2_years_str = create_year_array_str(sbs_na_sca_r2_years)
+    sbs_ovw_act_years_str = sql_list(sbs_ovw_act_years)
+    sbs_na_sca_r2_years_str = sql_list(sbs_na_sca_r2_years)
 
     ## For bd_* datasets, we do it the other way round: we source all years from
     ## bd_9ac_* first, then take the rest from bd_l_form.
     bd_l_form_years = setdiff(bd_l_form_years, bd_9ac_l_form_r2_years)
-    bd_l_form_years_str = create_year_array_str(bd_l_form_years)
-    bd_9ac_l_form_r2_years_str = create_year_array_str(bd_9ac_l_form_r2_years)
+    bd_l_form_years_str = sql_list(bd_l_form_years)
+    bd_9ac_l_form_r2_years_str = sql_list(bd_9ac_l_form_r2_years)
 
     ## Select only the relevant years from each of the datasets and append them
     ## to each other
@@ -310,7 +304,7 @@ function import_calibration_data(geo, start_calibration_year, end_calibration_ye
     try
         firm_years = sort(collect(union(union(sbs_na_sca_r2_years, sbs_ovw_act_years),
             union(bd_9ac_l_form_r2_years, bd_l_form_years))))
-        firm_years_str = create_year_array_str(firm_years)
+        firm_years_str = sql_list(firm_years)
 
         sqlquery = """
         SELECT time, SUM(value) as farms
@@ -372,7 +366,7 @@ function import_calibration_data(geo, start_calibration_year, end_calibration_ye
     ## employees and estimating the number of firms from the number of employees
     industries_with_missings = 0 .< dropdims(sum(ismissing.(calibration_data["firms"]), dims = 2), dims = 2)
     indizes_with_missing = findall(!iszero, industries_with_missings)
-    indizes_with_missing_str = create_year_array_str(indizes_with_missing)
+    indizes_with_missing_str = sql_list(indizes_with_missing)
     sqlquery = "select nace from '$(pqfile("nace64"))' where id in ($(indizes_with_missing_str))"
     missing_industries = execute(conn, sqlquery)
 
