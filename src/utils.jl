@@ -24,6 +24,13 @@ function execute(conn, query::String, dims::Tuple{Vararg{Int}})::Array
     return res
 end
 
+# Query the `value` column of a Eurostat table for one geo and the periods in
+# `times_str`; `filters` are additional SQL conditions
+function query_values(conn, table_id::String, geo, times_str::String, filters::String;
+                      order::String = "time")::Vector
+    execute(conn, "SELECT value FROM '$(pqfile(table_id))' WHERE time IN ($(times_str)) AND geo='$(geo)' AND $(filters) ORDER BY $(order)")
+end
+
 # Database query utilities -- debug version
 function execute_debug(conn, query::String)::DataFrame
     # Execute SQL query and return a DataFrame
