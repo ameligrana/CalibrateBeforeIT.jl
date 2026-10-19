@@ -1,3 +1,13 @@
+## Countries whose sectoral capital consumption is distributed according to
+## the EU20 structure (no usable industry-level data)
+const CAPITAL_CONSUMPTION_FROM_EU20 = ["FR", "IE", "LT", "LU", "MT", "PL", "SE"]
+const EU20 = ["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "DE", "EL", "HU", "IT", "LV", "NL", "PT", "RO", "SK", "SI", "ES"]
+
+## Countries with industry-level data on fixed assets and dwellings; all
+## others are distributed according to the EU7 structure
+const SECTORAL_FIXED_ASSETS = ["AT", "BG", "CZ", "EL", "FI", "LV", "SK"] # OR [2025-05-06 Di]: removed DK
+const EU7 = ["AT", "CZ", "DK", "EL", "FI", "LV", "SK"]
+
 function import_calibration_data(geo, start_calibration_year, end_calibration_year,
                                  number_sectors, figaro)
     conn = DBInterface.connect(DuckDB.DB)
@@ -8,34 +18,58 @@ function import_calibration_data(geo, start_calibration_year, end_calibration_ye
 
     calibration_data = Dict()
 
+    ## Sector x year matrices from NACE64 tables, for `geo` or summed over `geos`
+    nace64_filter = "nace_r2 IN (SELECT nace FROM '$(pqfile("nace64"))') AND nace_r2 NOT IN ($(sql_list(EXCLUDED_NACE64)))"
+    sectoral(table, filters) = execute(conn,
+        "SELECT value FROM '$(pqfile(table))' WHERE $(nace64_filter) AND time IN ($(years_str)) AND geo='$(geo)' AND $(filters) ORDER BY time, nace_r2",
+        (number_sectors, number_years))
+    sectoral_sum(table, filters, geos) = execute(conn,
+        "SELECT sum(value) FROM '$(pqfile(table))' WHERE $(nace64_filter) AND time IN ($(years_str)) AND geo IN ($(sql_list(geos))) AND $(filters) GROUP BY time, nace_r2 ORDER BY time, nace_r2",
+        (number_sectors, number_years))
+
+    ## Quarterly financial balance sheets, annual non-financial transactions
+    ## and annual government finance statistics
+    f_bs(sector, na_item, finpos) = query_values(conn, "nasq_10_f_bs", geo, quarters_str,
+        "unit='MIO_EUR' AND sector='$(sector)' AND na_item='$(na_item)' AND finpos='$(finpos)'")
+    nf_tr(sector, na_item, direct) = query_values(conn, "nasa_10_nf_tr", geo, years_str,
+        "unit='CP_MEUR' AND sector='$(sector)' AND na_item='$(na_item)' AND direct='$(direct)'")
+    gov_main(na_item) = query_values(conn, "gov_10a_main", geo, years_str,
+        "unit='MIO_EUR' AND sector='S13' AND na_item='$(na_item)'")
+
+    ## Quarterly series that are not available for all countries. If missing,
+    ## the variable is not created (or left empty) and get_params_and_initial_conditions
+    ## falls back to the annual series.
+    function quarterly_if_available!(key, table, filters, description, fallback)
+        try
+            calibration_data[key]=query_values(conn, table, geo, quarters_str, filters);
+            if length(calibration_data[key]) == 0
+                throw(ErrorException("Empty result"))
+            end
+        catch e
+            @warn "  --> $(geo): Quarterly $(description) data not available ($(typeof(e))), $(fallback)"
+        end
+    end
+
     ## Set these date numbers
     calibration_data["years_num"] = date2num_yearly(start_calibration_year:end_calibration_year)
     calibration_data["quarters_num"] = date2num_quarterly(start_calibration_year:end_calibration_year)
 
     ## time series
-    if geo in ["FR", "IE", "LT", "LU", "MT", "PL", "SE"]
-        sqlquery="SELECT value FROM '$(pqfile("nama_10_a64"))' WHERE nace_r2='TOTAL' AND time IN ($(years_str)) AND unit = 'CP_MEUR' AND na_item='P51C' AND geo='$(geo)' ORDER BY time, nace_r2"
-        calibration_data["capital_consumption"]=execute(conn,sqlquery);
-
-        sqlquery="SELECT sum(value) FROM '$(pqfile("nama_10_a64"))' WHERE nace_r2 IN (SELECT nace FROM '$(pqfile("nace64"))') AND time IN ($(years_str)) AND nace_r2 NOT IN ('T', 'U', 'L68A') AND unit = 'CP_MEUR' AND na_item='P51C' AND geo IN ('AT' ,'BE' ,'BG' ,'HR' ,'CY' ,'CZ' ,'DK' ,'EE' ,'FI' ,'DE' ,'EL' ,'HU' ,'IT' ,'LV' ,'NL' ,'PT' ,'RO' ,'SK' ,'SI' ,'ES') GROUP BY time, nace_r2 ORDER BY time, nace_r2"
-        calibration_data["nace64_capital_consumption_eu20"]=execute(conn,sqlquery, (number_sectors,number_years));
-
-        sqlquery="SELECT sum(value) FROM '$(pqfile("nama_10_a64"))' WHERE nace_r2 IN (SELECT nace FROM '$(pqfile("nace64"))') AND time IN ($(years_str)) AND nace_r2 NOT IN ('T', 'U', 'L68A') AND unit = 'CP_MEUR' AND na_item='P1' AND geo IN ('AT' ,'BE' ,'BG' ,'HR' ,'CY' ,'CZ' ,'DK' ,'EE' ,'FI' ,'DE' ,'EL' ,'HU' ,'IT' ,'LV' ,'NL' ,'PT' ,'RO' ,'SK' ,'SI' ,'ES') GROUP BY time, nace_r2 ORDER BY time, nace_r2"
-        calibration_data["nominal_nace64_output_eu20"]=execute(conn,sqlquery,(number_sectors,number_years));
+    if geo in CAPITAL_CONSUMPTION_FROM_EU20
+        calibration_data["capital_consumption"]=query_values(conn, "nama_10_a64", geo, years_str,
+            "nace_r2='TOTAL' AND unit = 'CP_MEUR' AND na_item='P51C'");
+        calibration_data["nace64_capital_consumption_eu20"]=sectoral_sum("nama_10_a64", "unit = 'CP_MEUR' AND na_item='P51C'", EU20);
+        calibration_data["nominal_nace64_output_eu20"]=sectoral_sum("nama_10_a64", "unit = 'CP_MEUR' AND na_item='P1'", EU20);
     else
-        sqlquery="SELECT value FROM '$(pqfile("nama_10_a64"))' WHERE nace_r2 IN (SELECT nace FROM '$(pqfile("nace64"))') AND time IN ($(years_str)) AND nace_r2 NOT IN ('T', 'U', 'L68A') AND unit = 'CP_MEUR' AND na_item='P51C' AND geo='$(geo)' ORDER BY time, nace_r2"
-        calibration_data["nace64_capital_consumption"]=execute(conn,sqlquery,(number_sectors,number_years));
-
-        sqlquery="SELECT value FROM '$(pqfile("nama_10_a64"))' WHERE nace_r2 IN (SELECT nace FROM '$(pqfile("nace64"))') AND time IN ($(years_str)) AND nace_r2 NOT IN ('T', 'U', 'L68A') AND unit = 'CP_MEUR' AND na_item='P1' AND geo='$(geo)' ORDER BY time, nace_r2"
-        calibration_data["nominal_nace64_output"]=execute(conn,sqlquery,(number_sectors,number_years));
+        calibration_data["nace64_capital_consumption"]=sectoral("nama_10_a64", "unit = 'CP_MEUR' AND na_item='P51C'");
+        calibration_data["nominal_nace64_output"]=sectoral("nama_10_a64", "unit = 'CP_MEUR' AND na_item='P1'");
     end
 
-    sqlquery="SELECT value FROM '$(pqfile("nama_10_a64"))' WHERE nace_r2='TOTAL' AND time IN ($(years_str)) AND unit = 'CP_MEUR' AND na_item='D11' AND geo='$(geo)' ORDER BY time, nace_r2"
-    calibration_data["wages"]=execute(conn,sqlquery);
+    calibration_data["wages"]=query_values(conn, "nama_10_a64", geo, years_str,
+        "nace_r2='TOTAL' AND unit = 'CP_MEUR' AND na_item='D11'");
 
     # Sectoral wages (D11) for employers_social_contributions calculation
-    sqlquery="SELECT value FROM '$(pqfile("nama_10_a64"))' WHERE nace_r2 IN (SELECT nace FROM '$(pqfile("nace64"))') AND time IN ($(years_str)) AND nace_r2 NOT IN ('T', 'U', 'L68A') AND unit = 'CP_MEUR' AND na_item='D11' AND geo='$(geo)' ORDER BY time, nace_r2"
-    calibration_data["wages_by_sector"]=execute(conn,sqlquery,(number_sectors,number_years));
+    calibration_data["wages_by_sector"]=sectoral("nama_10_a64", "unit = 'CP_MEUR' AND na_item='D11'");
 
     # Impute missing sectoral wages using economy-wide wages/compensation ratio
     wages_by_sector = calibration_data["wages_by_sector"]
@@ -60,20 +94,17 @@ function import_calibration_data(geo, start_calibration_year, end_calibration_ye
         calibration_data["wages_by_sector"] = wages_by_sector
     end
 
-    sqlquery="SELECT value FROM '$(pqfile("nasq_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S11' AND na_item='F2' AND finpos='ASS' ORDER BY time"
-    calibration_data["firm_cash_quarterly"]=execute(conn,sqlquery);
-
-    sqlquery="SELECT value FROM '$(pqfile("nasq_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S11' AND na_item='F4' AND finpos='LIAB' ORDER BY time"
-    calibration_data["firm_debt_quarterly"]=execute(conn,sqlquery);
+    calibration_data["firm_cash_quarterly"]=f_bs("S11", "F2", "ASS");
+    calibration_data["firm_debt_quarterly"]=f_bs("S11", "F4", "LIAB");
 
     # Consolidated F4 loans (co_nco='CO') exclude intra-sector transactions
     # (intercompany loans within multinationals). Annual only, so we compute
     # the CO/NCO ratio and interpolate it to quarterly frequency.
     try
-        sqlquery="SELECT value FROM '$(pqfile("nasa_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='MIO_EUR' AND sector='S11' AND na_item='F4' AND finpos='LIAB' AND co_nco='CO' ORDER BY time"
-        firm_debt_consolidated = execute(conn, sqlquery)
-        sqlquery="SELECT value FROM '$(pqfile("nasa_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='MIO_EUR' AND sector='S11' AND na_item='F4' AND finpos='LIAB' AND co_nco='NCO' ORDER BY time"
-        firm_debt_nonconsolidated = execute(conn, sqlquery)
+        firm_debt_consolidated = query_values(conn, "nasa_10_f_bs", geo, years_str,
+            "unit='MIO_EUR' AND sector='S11' AND na_item='F4' AND finpos='LIAB' AND co_nco='CO'")
+        firm_debt_nonconsolidated = query_values(conn, "nasa_10_f_bs", geo, years_str,
+            "unit='MIO_EUR' AND sector='S11' AND na_item='F4' AND finpos='LIAB' AND co_nco='NCO'")
         if length(firm_debt_consolidated) == length(firm_debt_nonconsolidated) == number_years
             consolidation_ratio = firm_debt_consolidated ./ firm_debt_nonconsolidated
             # Interpolate annual ratio to quarterly using year-end date numbers
@@ -90,156 +121,107 @@ function import_calibration_data(geo, start_calibration_year, end_calibration_ye
         @warn "Consolidated F4 data not available for $geo: $e"
     end
 
-    sqlquery="SELECT value FROM '$(pqfile("nasq_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S14_S15' AND na_item='F2' AND finpos='ASS' ORDER BY time"
-    calibration_data["household_cash_quarterly"]=execute(conn,sqlquery);
+    calibration_data["household_cash_quarterly"]=f_bs("S14_S15", "F2", "ASS");
 
-    sqlquery1="SELECT value FROM '$(pqfile("nasq_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S121_S122_S123' AND na_item='F5' AND finpos='LIAB' ORDER BY time"
-    all_monetary_institutions_equity = execute(conn, sqlquery1)
-    sqlquery2="SELECT value FROM '$(pqfile("nasq_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S121' AND na_item='F5' AND finpos='LIAB' ORDER BY time"
-    centralbank_equity = execute(conn, sqlquery2)
+    all_monetary_institutions_equity = f_bs("S121_S122_S123", "F5", "LIAB")
+    centralbank_equity = f_bs("S121", "F5", "LIAB")
     if size(centralbank_equity, 1) == number_quarters
         calibration_data["bank_equity_quarterly"] = all_monetary_institutions_equity - centralbank_equity;
     else
         calibration_data["bank_equity_quarterly"] = all_monetary_institutions_equity;
     end
 
-    sqlquery="SELECT value FROM '$(pqfile("gov_10q_ggdebt"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S13' AND na_item='GD' ORDER BY time"
-    calibration_data["government_debt_quarterly"]=execute(conn,sqlquery);
+    calibration_data["government_debt_quarterly"]=query_values(conn, "gov_10q_ggdebt", geo, quarters_str,
+        "unit='MIO_EUR' AND sector='S13' AND na_item='GD'");
 
-    sqlquery="SELECT value FROM '$(pqfile("gov_10a_main"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='MIO_EUR' AND sector='S13' AND na_item='B9' ORDER BY time"
-    calibration_data["government_deficit"]=execute(conn,sqlquery);
+    calibration_data["government_deficit"]=gov_main("B9");
 
     # Try quarterly government deficit first, fall back to annual if missing
-    try
-        sqlquery="SELECT value FROM '$(pqfile("gov_10q_ggnfa"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S13' AND na_item='B9' AND s_adj='NSA' ORDER BY time"
-        calibration_data["government_deficit_quarterly"]=execute(conn,sqlquery);
-        if length(calibration_data["government_deficit_quarterly"]) == 0
-            throw(ErrorException("Empty result"))
-        end
-    catch e
-        @warn "  --> $(geo): Quarterly government deficit data not available ($(typeof(e))), will use annual data"
-        # Don't create quarterly variable - will fall back to annual in get_params_and_initial_conditions.jl
-    end
+    quarterly_if_available!("government_deficit_quarterly", "gov_10q_ggnfa",
+        "unit='MIO_EUR' AND sector='S13' AND na_item='B9' AND s_adj='NSA'",
+        "government deficit", "will use annual data")
 
-    sqlquery="SELECT value FROM '$(pqfile("nasa_10_nf_tr"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='CP_MEUR' AND sector='S14_S15' AND na_item='D4' AND direct='RECV' ORDER BY time"
-    calibration_data["property_income"]=execute(conn,sqlquery);
+    calibration_data["property_income"]=nf_tr("S14_S15", "D4", "RECV");
 
     # D4 PAID: Property income paid by households (for net property income calculation)
-    sqlquery="SELECT value FROM '$(pqfile("nasa_10_nf_tr"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='CP_MEUR' AND sector='S14_S15' AND na_item='D4' AND direct='PAID' ORDER BY time"
-    calibration_data["property_income_paid"]=execute(conn,sqlquery);
+    calibration_data["property_income_paid"]=nf_tr("S14_S15", "D4", "PAID");
 
     # Use B2A3G (Gross Operating Surplus/Mixed Income) instead of B2A3N (Net)
     # Gross includes capital consumption, which is needed for ESA-consistent disposable income
-    sqlquery="SELECT value FROM '$(pqfile("nasa_10_nf_tr"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='CP_MEUR' AND sector='S14_S15' AND na_item='B2A3G' AND direct='RECV' ORDER BY time"
-    calibration_data["mixed_income"]=execute(conn,sqlquery);
+    calibration_data["mixed_income"]=nf_tr("S14_S15", "B2A3G", "RECV");
 
-    sqlquery="SELECT value FROM '$(pqfile("nasa_10_nf_tr"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='CP_MEUR' AND sector='S11' AND na_item='D41' AND direct='PAID' ORDER BY time"
-    calibration_data["firm_interest"]=execute(conn,sqlquery);
+    calibration_data["firm_interest"]=nf_tr("S11", "D41", "PAID");
 
     # Try quarterly first, fall back to annual/4 approximation if missing
-    try
-        sqlquery="SELECT value FROM '$(pqfile("nasq_10_nf_tr"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='CP_MEUR' AND sector='S11' AND na_item='D41' AND direct='PAID' AND s_adj='NSA' ORDER BY time"
-        calibration_data["firm_interest_quarterly"]=execute(conn,sqlquery);
-        if length(calibration_data["firm_interest_quarterly"]) == 0
-            throw(ErrorException("Empty result"))
-        end
-    catch e
-        @warn "  --> $(geo): Quarterly firm interest data not available ($(typeof(e))), will use annual data with timescale conversion"
-        # Don't create quarterly variable - will fall back to annual in get_params_and_initial_conditions.jl
-    end
+    quarterly_if_available!("firm_interest_quarterly", "nasq_10_nf_tr",
+        "unit='CP_MEUR' AND sector='S11' AND na_item='D41' AND direct='PAID' AND s_adj='NSA'",
+        "firm interest", "will use annual data with timescale conversion")
 
-    sqlquery="SELECT value FROM '$(pqfile("nasa_10_nf_tr"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='CP_MEUR' AND sector='S11' AND na_item='D51' AND direct='PAID' ORDER BY time"
-    calibration_data["corporate_tax"]=execute(conn,sqlquery);
+    calibration_data["corporate_tax"]=nf_tr("S11", "D51", "PAID");
 
-    sqlquery="SELECT value FROM '$(pqfile("gov_10a_main"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='MIO_EUR' AND sector='S13' AND na_item='D91REC' ORDER BY time"
-    calibration_data["capital_taxes"]=execute(conn,sqlquery);
+    calibration_data["capital_taxes"]=gov_main("D91REC");
 
     if geo in ["EE", "SE"]
         ## convert missing entries to zeros
         calibration_data["capital_taxes"][ismissing.(calibration_data["capital_taxes"])] .= 0.0
     end
 
-    sqlquery="SELECT value FROM '$(pqfile("gov_10a_main"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='MIO_EUR' AND sector='S13' AND na_item='D41PAY' ORDER BY time"
-    calibration_data["interest_government_debt"]=execute(conn,sqlquery);
+    calibration_data["interest_government_debt"]=gov_main("D41PAY");
 
     # Try quarterly first, fall back to annual/4 approximation if missing
-    try
-        sqlquery="SELECT value FROM '$(pqfile("gov_10q_ggnfa"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S13' AND na_item='D41PAY' AND s_adj='NSA' ORDER BY time"
-        calibration_data["interest_government_debt_quarterly"]=execute(conn,sqlquery);
-        if length(calibration_data["interest_government_debt_quarterly"]) == 0
-            throw(ErrorException("Empty result"))
-        end
-    catch e
-        @warn "  --> $(geo): Quarterly government interest data not available ($(typeof(e))), will use annual data with timescale conversion"
-        # Don't create quarterly variable - will fall back to annual in get_params_and_initial_conditions.jl
-    end
+    quarterly_if_available!("interest_government_debt_quarterly", "gov_10q_ggnfa",
+        "unit='MIO_EUR' AND sector='S13' AND na_item='D41PAY' AND s_adj='NSA'",
+        "government interest", "will use annual data with timescale conversion")
 
-    sqlquery="SELECT value FROM '$(pqfile("gov_10a_exp"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='MIO_EUR' AND sector='S13' AND cofog99='GF1005' AND na_item='TE' ORDER BY time"
-    calibration_data["unemployment_benefits"]=execute(conn,sqlquery);
-
-    sqlquery="SELECT value FROM '$(pqfile("gov_10a_exp"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='MIO_EUR' AND sector='S13' AND cofog99='GF1002' AND na_item='TE' ORDER BY time"
-    calibration_data["pension_benefits"]=execute(conn,sqlquery);
+    calibration_data["unemployment_benefits"]=query_values(conn, "gov_10a_exp", geo, years_str,
+        "unit='MIO_EUR' AND sector='S13' AND cofog99='GF1005' AND na_item='TE'");
+    calibration_data["pension_benefits"]=query_values(conn, "gov_10a_exp", geo, years_str,
+        "unit='MIO_EUR' AND sector='S13' AND cofog99='GF1002' AND na_item='TE'");
 
     # D62 RECV from household sector - captures ALL social benefits including private pensions
     # (gov_10a_main D62PAY only captures government-paid benefits, missing private pension funds)
-    sqlquery="SELECT value FROM '$(pqfile("nasa_10_nf_tr"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='CP_MEUR' AND sector='S14_S15' AND na_item='D62' AND direct='RECV' ORDER BY time"
-    calibration_data["social_benefits"]=execute(conn,sqlquery);
+    calibration_data["social_benefits"]=nf_tr("S14_S15", "D62", "RECV");
 
     # D61 PAID from household sector - captures ALL social contributions including private pensions
     # (gov_10a_main D61REC only captures government-received contributions, missing private pension funds)
-    sqlquery="SELECT value FROM '$(pqfile("nasa_10_nf_tr"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='CP_MEUR' AND sector='S14_S15' AND na_item='D61' AND direct='PAID' ORDER BY time"
-    calibration_data["social_contributions"]=execute(conn,sqlquery);
+    calibration_data["social_contributions"]=nf_tr("S14_S15", "D61", "PAID");
 
     # D7: Other current transfers (replaces government budget residual for ESA consistency)
-    sqlquery="SELECT value FROM '$(pqfile("nasa_10_nf_tr"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='CP_MEUR' AND sector='S14_S15' AND na_item='D7' AND direct='RECV' ORDER BY time"
-    calibration_data["other_current_transfers_recv"]=execute(conn,sqlquery);
-
-    sqlquery="SELECT value FROM '$(pqfile("nasa_10_nf_tr"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='CP_MEUR' AND sector='S14_S15' AND na_item='D7' AND direct='PAID' ORDER BY time"
-    calibration_data["other_current_transfers_paid"]=execute(conn,sqlquery);
+    calibration_data["other_current_transfers_recv"]=nf_tr("S14_S15", "D7", "RECV");
+    calibration_data["other_current_transfers_paid"]=nf_tr("S14_S15", "D7", "PAID");
 
     # B6G: Gross Disposable Income (ESA standard) for verification
-    sqlquery="SELECT value FROM '$(pqfile("nasa_10_nf_tr"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='CP_MEUR' AND sector='S14_S15' AND na_item='B6G' AND direct='RECV' ORDER BY time"
-    calibration_data["gross_disposable_income_esa"]=execute(conn,sqlquery);
+    calibration_data["gross_disposable_income_esa"]=nf_tr("S14_S15", "B6G", "RECV");
 
     # B8G: Gross Saving (ESA standard) for savings rate verification
-    sqlquery="SELECT value FROM '$(pqfile("nasa_10_nf_tr"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='CP_MEUR' AND sector='S14_S15' AND na_item='B8G' AND direct='RECV' ORDER BY time"
-    calibration_data["gross_saving_esa"]=execute(conn,sqlquery);
+    calibration_data["gross_saving_esa"]=nf_tr("S14_S15", "B8G", "RECV");
 
-    sqlquery="SELECT value FROM '$(pqfile("gov_10a_main"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='MIO_EUR' AND sector='S13' AND na_item='D5REC' ORDER BY time"
-    calibration_data["income_tax"]=execute(conn,sqlquery);
+    calibration_data["income_tax"]=gov_main("D5REC");
 
-    sqlquery="SELECT value FROM '$(pqfile("nama_10_an6"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND asset10='N11G' AND unit='CP_MEUR' ORDER BY time"
-    calibration_data["gross_fixed_capitalformation"]=execute(conn,sqlquery);
-
-    sqlquery="SELECT value FROM '$(pqfile("nama_10_an6"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND asset10='N111G' AND unit='CP_MEUR' ORDER BY time"
-    calibration_data["gross_capitalformation_dwellings"]=execute(conn,sqlquery);
+    calibration_data["gross_fixed_capitalformation"]=query_values(conn, "nama_10_an6", geo, years_str,
+        "asset10='N11G' AND unit='CP_MEUR'");
+    calibration_data["gross_capitalformation_dwellings"]=query_values(conn, "nama_10_an6", geo, years_str,
+        "asset10='N111G' AND unit='CP_MEUR'");
 
     # Census data for unemployed/inactive (point-in-time fallback)
     # Census data is typically from 2011, not a time series
-    try
-        sqlquery="SELECT value FROM '$(pqfile("cens_11an_r2"))' WHERE geo='$(geo)' AND wstatus='UNE' AND sex='T' AND nace_r2='TOTAL' AND unit='NR' AND age='TOTAL'"
-        result = execute(conn,sqlquery);
-        if length(result) > 0 && !ismissing(result[1])
-            calibration_data["unemployed_census"]=result[1];
+    for (key, aggregate, wstatus, description) in (("unemployed_census", "value", "UNE", "unemployed"),
+                                                   ("inactive_census", "sum(value)", "INAC", "inactive"))
+        try
+            sqlquery="SELECT $(aggregate) FROM '$(pqfile("cens_11an_r2"))' WHERE geo='$(geo)' AND wstatus='$(wstatus)' AND sex='T' AND nace_r2='TOTAL' AND unit='NR' AND age='TOTAL'"
+            result = execute(conn,sqlquery);
+            if length(result) > 0 && !ismissing(result[1])
+                calibration_data[key]=result[1];
+            end
+        catch e
+            @warn "  --> $(geo): Census $(description) count not available ($(typeof(e)))"
         end
-    catch e
-        @warn "  --> $(geo): Census unemployed count not available ($(typeof(e)))"
-    end
-
-    try
-        sqlquery="SELECT sum(value) FROM '$(pqfile("cens_11an_r2"))' WHERE geo='$(geo)' AND wstatus='INAC' AND sex='T' AND nace_r2='TOTAL' AND unit='NR' AND age='TOTAL'"
-        result = execute(conn,sqlquery);
-        if length(result) > 0 && !ismissing(result[1])
-            calibration_data["inactive_census"]=result[1];
-        end
-    catch e
-        @warn "  --> $(geo): Census inactive count not available ($(typeof(e)))"
     end
 
     sqlquery="SELECT 1e3*value FROM '$(pqfile("nama_10_pe"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='THS_PER' AND na_item='POP_NC' ORDER BY time"
     calibration_data["population"]=execute(conn,sqlquery);
 
-    sqlquery="SELECT 1e3*value FROM '$(pqfile("nama_10_a64_e"))' WHERE nace_r2 IN (SELECT nace FROM '$(pqfile("nace64"))') and time IN ($(years_str)) AND geo='$(geo)' AND nace_r2 NOT IN ('T', 'U', 'L68A') AND unit = 'THS_PER' AND na_item='SAL_DC' ORDER BY time, nace_r2"
+    sqlquery="SELECT 1e3*value FROM '$(pqfile("nama_10_a64_e"))' WHERE $(nace64_filter) AND time IN ($(years_str)) AND geo='$(geo)' AND unit = 'THS_PER' AND na_item='SAL_DC' ORDER BY time, nace_r2"
     calibration_data["employees"]=execute(conn,sqlquery);
     calibration_data["employees"]=reshape(calibration_data["employees"],(number_sectors,Int64(length(calibration_data["employees"])/number_sectors)));
     calibration_data["employees"]=coalesce.(calibration_data["employees"],100);
@@ -296,16 +278,14 @@ function import_calibration_data(geo, start_calibration_year, end_calibration_ye
     """
 
     calibration_data["firms"]=execute(conn,sqlquery);
-    number_firm_years = union(union(sbs_na_sca_r2_years, sbs_ovw_act_years),
-        union(bd_9ac_l_form_r2_years, bd_l_form_years)) |> length
+    firm_years = sort(collect(union(union(sbs_na_sca_r2_years, sbs_ovw_act_years),
+        union(bd_9ac_l_form_r2_years, bd_l_form_years))))
+    number_firm_years = length(firm_years)
     calibration_data["firms"]=reshape(calibration_data["firms"],(number_sectors,number_firm_years));
 
     ## Farm Structure Survey for A01 (agriculture) - provides farm counts for survey years
     try
-        firm_years = sort(collect(union(union(sbs_na_sca_r2_years, sbs_ovw_act_years),
-            union(bd_9ac_l_form_r2_years, bd_l_form_years))))
         firm_years_str = sql_list(firm_years)
-
         sqlquery = """
         SELECT time, SUM(value) as farms
         FROM '$(pqfile("ef_m_farmleg"))'
@@ -402,46 +382,37 @@ function import_calibration_data(geo, start_calibration_year, end_calibration_ye
     output=dropdims(sum(figaro["intermediate_consumption"], dims=1), dims=1) +
            figaro["taxes_products"] + figaro["taxes_production"] +
            figaro["compensation_employees"] + figaro["operating_surplus"];#+capital_consumption;
-    if geo in ["FR", "IE", "LT", "LU", "MT", "PL", "SE"]
+    if geo in CAPITAL_CONSUMPTION_FROM_EU20
+        capital_consumption_structure = calibration_data["nace64_capital_consumption_eu20"] ./ calibration_data["nominal_nace64_output_eu20"] .* output
         calibration_data["capital_consumption"]=calibration_data["capital_consumption"]' .*
-                                                (calibration_data["nace64_capital_consumption_eu20"] ./ calibration_data["nominal_nace64_output_eu20"] .* output) ./
-                                                sum(calibration_data["nace64_capital_consumption_eu20"] ./ calibration_data["nominal_nace64_output_eu20"] .* output,
-                                                dims = 1);
+                                                capital_consumption_structure ./
+                                                sum(capital_consumption_structure, dims = 1);
     else
         calibration_data["capital_consumption"]=calibration_data["nace64_capital_consumption"]./calibration_data["nominal_nace64_output"].*output;
     end
 
-    if geo in ["AT", "BG", "CZ", "EL", "FI", "LV", "SK"] # OR [2025-05-06 Di]: removed DK
-        sqlquery="SELECT value FROM '$(pqfile("nama_10_nfa_st"))' WHERE nace_r2 IN (SELECT nace FROM '$(pqfile("nace64"))') AND geo='$(geo)' AND time IN ($(years_str)) AND nace_r2 NOT IN ('T', 'U', 'L68A') AND asset10='N11N' AND unit='CRC_MEUR' ORDER BY time, nace_r2"
-        calibration_data["fixed_assets"]=execute(conn,sqlquery,(number_sectors,number_years));
-
-        sqlquery="SELECT value FROM '$(pqfile("nama_10_nfa_st"))' WHERE nace_r2 IN (SELECT nace FROM '$(pqfile("nace64"))') AND geo='$(geo)' AND time IN ($(years_str)) AND nace_r2 NOT IN ('T', 'U', 'L68A') AND asset10='N111N' AND unit='CRC_MEUR' ORDER BY time, nace_r2"
-        calibration_data["dwellings"]=execute(conn,sqlquery,(number_sectors,number_years));
+    if geo in SECTORAL_FIXED_ASSETS
+        calibration_data["fixed_assets"]=sectoral("nama_10_nfa_st", "asset10='N11N' AND unit='CRC_MEUR'");
+        calibration_data["dwellings"]=sectoral("nama_10_nfa_st", "asset10='N111N' AND unit='CRC_MEUR'");
     else
         ## For some countries, there is insufficient industry-level data on
         ## fixed assets and dwellings, only country totals. For these countries,
         ## we assume that fixed assets have the same structure as the EU7 and
         ## distribute their total fixed assets accordingly. Total dwellings are
         ## all assigned to the real estate industry.
-        sqlquery="SELECT value FROM '$(pqfile("nama_10_nfa_st"))' WHERE nace_r2 = 'TOTAL' AND geo='$(geo)' AND time IN ($(years_str)) AND asset10='N11N' AND unit='CRC_MEUR' ORDER BY time"
-        calibration_data["fixed_assets"]=execute(conn,sqlquery);
+        calibration_data["fixed_assets"]=query_values(conn, "nama_10_nfa_st", geo, years_str,
+            "nace_r2 = 'TOTAL' AND asset10='N11N' AND unit='CRC_MEUR'");
+        calibration_data["dwellings"]=query_values(conn, "nama_10_nfa_st", geo, years_str,
+            "nace_r2 = 'TOTAL' AND asset10='N111N' AND unit='CRC_MEUR'");
 
-        sqlquery="SELECT value FROM '$(pqfile("nama_10_nfa_st"))' WHERE nace_r2 = 'TOTAL' AND geo='$(geo)' AND time IN ($(years_str)) AND asset10='N111N' AND unit='CRC_MEUR' ORDER BY time"
-        calibration_data["dwellings"]=execute(conn,sqlquery);
+        calibration_data["fixed_assets_eu7"]=sectoral_sum("nama_10_nfa_st", "asset10='N11N' AND unit='CRC_MEUR'", EU7);
+        calibration_data["dwellings_eu7"]=sectoral_sum("nama_10_nfa_st", "asset10='N111N' AND unit='CRC_MEUR'", EU7);
+        calibration_data["nominal_nace64_output_eu7"]=sectoral_sum("nama_10_a64", "unit = 'CP_MEUR' AND na_item='P1'", EU7);
 
-        sqlquery="SELECT sum(value) FROM '$(pqfile("nama_10_nfa_st"))' WHERE nace_r2 IN (SELECT nace FROM '$(pqfile("nace64"))') AND geo IN ('AT', 'CZ', 'DK', 'EL', 'FI', 'LV', 'SK') AND time IN ($(years_str)) AND nace_r2 NOT IN ('T', 'U', 'L68A') AND asset10='N11N' AND unit='CRC_MEUR' GROUP BY time, nace_r2 ORDER BY time, nace_r2"
-        calibration_data["fixed_assets_eu7"]=execute(conn,sqlquery,(number_sectors,number_years));
-
-        sqlquery="SELECT sum(value) FROM '$(pqfile("nama_10_nfa_st"))' WHERE nace_r2 IN (SELECT nace FROM '$(pqfile("nace64"))') AND geo IN ('AT', 'CZ', 'DK', 'EL', 'FI', 'LV', 'SK') AND time IN ($(years_str)) AND nace_r2 NOT IN ('T', 'U', 'L68A') AND asset10='N111N' AND unit='CRC_MEUR' GROUP BY time, nace_r2 ORDER BY time, nace_r2"
-        calibration_data["dwellings_eu7"]=execute(conn,sqlquery,(number_sectors,number_years));
-
-        sqlquery="SELECT sum(value) FROM '$(pqfile("nama_10_a64"))' WHERE nace_r2 IN (SELECT nace FROM '$(pqfile("nace64"))') AND time IN ($(years_str)) AND nace_r2 NOT IN ('T', 'U', 'L68A') AND unit = 'CP_MEUR' AND na_item='P1' AND geo IN ('AT', 'CZ', 'DK', 'EL', 'FI', 'LV', 'SK') GROUP BY time, nace_r2 ORDER BY time, nace_r2"
-        calibration_data["nominal_nace64_output_eu7"]=execute(conn,sqlquery,(number_sectors,number_years));
-
+        fixed_assets_structure = (calibration_data["fixed_assets_eu7"]-calibration_data["dwellings_eu7"]) ./ calibration_data["nominal_nace64_output_eu7"].*output
         fixed_assets_other_than_dwellings=(calibration_data["fixed_assets"]-calibration_data["dwellings"])' .*
-                                          ((calibration_data["fixed_assets_eu7"]-calibration_data["dwellings_eu7"]) ./ calibration_data["nominal_nace64_output_eu7"].*output) ./
-                                          sum((calibration_data["fixed_assets_eu7"]-calibration_data["dwellings_eu7"]) ./ calibration_data["nominal_nace64_output_eu7"].*output,
-                                              dims = 1);
+                                          fixed_assets_structure ./
+                                          sum(fixed_assets_structure, dims = 1);
         dwellings=zeros(Union{Missing, Float64},
             size(fixed_assets_other_than_dwellings));
         dwellings[44,:]=calibration_data["dwellings"];
