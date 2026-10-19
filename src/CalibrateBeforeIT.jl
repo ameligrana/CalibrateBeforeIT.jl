@@ -8,6 +8,8 @@ using Tables
 using DataFrames
 using Dates
 using JLD2
+using Interpolations
+using p7zip_jll
 
 export download_and_extract_zenodo_data, get_eurostat_table_ids,
     combine_tables, pqfile, execute, execute_debug, extract_years,

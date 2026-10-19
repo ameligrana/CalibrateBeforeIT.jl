@@ -1,5 +1,3 @@
-using DuckDB
-
 function unify_unemployment_rate_sources(table_id::String,
     conn)
 
@@ -53,9 +51,3 @@ function unify_unemployment_rate_sources(table_id::String,
 
     return res_query
 end
-
-# execute(conn, "SELECT COUNT(*) FROM '$(pqfile("une_rt_a"))'")
-# execute(conn, "SELECT COUNT(*) FROM '$(pqfile("une_rt_a_h"))'")
-
-# execute(conn, "SELECT COUNT(*) FROM '$(pqfile("une_rt_q"))'")
-# execute(conn, "SELECT COUNT(*) FROM '$(pqfile("une_rt_q_h"))'")

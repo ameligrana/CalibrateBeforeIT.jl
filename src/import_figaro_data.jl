@@ -1,10 +1,3 @@
-# module Import_Figaro_Data
-# export import_figaro_data
-# using DuckDB
-# using DataFrames
-# using Tables
-# using ..Utils
-
 function get_minmax_calibration_years(geo)
     conn = DBInterface.connect(DuckDB.DB)
     sqlquery = "SELECT min(time) FROM '$(pqfile("naio_10_fcp_ii"))' WHERE c_dest='$(geo)' AND ind_ava IN (SELECT nace_figaro FROM '$(pqfile("nace64"))' WHERE nace NOT IN ('L68A', 'T', 'U')) AND ind_use IN (SELECT nace_figaro FROM '$(pqfile("nace64"))' WHERE nace NOT IN ('L68A', 'T', 'U'))"
@@ -80,21 +73,9 @@ function import_figaro_data(geo,
     sqlquery="SELECT value FROM '$(pqfile("naio_10_fcp_ii"))' WHERE c_dest='$(geo)' AND ind_use='P3_S13' AND ind_ava='D21X31' AND time IN ($(years_str)) ORDER BY time";
     figaro["taxes_products_government"]=execute(conn,sqlquery);
 
-    # figaro["taxes_products_export"]=zeros(size(figaro["taxes_products_household"]));
-
-    # figaro["wages"]=0.825*figaro["compensation_employees"];
-
-    # figaro["capital_consumption"]=0.1*(squeeze(sum(figaro["intermediate_consumption"],1))+figaro["operating_surplus"]+figaro["compensation_employees"]+figaro["taxes_production"]+figaro["taxes_products"]);
-
-    # figaro["operating_surplus"]=figaro["operating_surplus"]-figaro["capital_consumption"];
-
     if geo=="IE"
         figaro["compensation_employees"][3,:]=linear_interp_extrap(3:number_years,figaro["compensation_employees"][3,3:number_years],1:number_years);
         figaro["compensation_employees"][57,:]=linear_interp_extrap(3:number_years,figaro["compensation_employees"][57,3:number_years],1:number_years);
-        # figaro["compensation_employees"][10,:]=linear_interp_extrap([1 2 3 4 6 7],figaro["compensation_employees"][10,[1 2 3 4 6 7]],1:7);
     end
     return figaro
 end
-
-
-# end

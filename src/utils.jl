@@ -1,10 +1,3 @@
-# module Utils
-# export pqfile, execute
-# using DuckDB, Tables
-
-using Interpolations
-using Dates
-
 # Constants for date conversion
 const MILLISECONDS_PER_DAY = 1000 * 60 * 60 * 24
 
@@ -77,5 +70,3 @@ date2num_quarterly(years_range::UnitRange{Int64})::Vector{Int64} = reduce(vcat, 
 # Convert MATLAB date number back to DateTime
 num2date(n::Number)::Dates.DateTime = MATLAB_EPOCH + Dates.Millisecond(round(Int64, n * MILLISECONDS_PER_DAY))
 
-
-# end

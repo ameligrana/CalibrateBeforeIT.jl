@@ -6,8 +6,6 @@ from the detailed NACE Rev.2 system to the simplified 64-industry framework
 used by economic models like BeforeIT.jl.
 """
 
-using DuckDB
-
 """
     create_business_demographic_a64_data(eurostat_path::String, conn;
                             excluded_industries::Vector{String} = ["L68A", "T", "U"])

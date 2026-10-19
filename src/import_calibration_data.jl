@@ -1,5 +1,3 @@
-
-
 function import_calibration_data(geo, start_calibration_year, end_calibration_year,
                                  number_sectors, figaro)
     conn = DBInterface.connect(DuckDB.DB)
@@ -68,23 +66,9 @@ function import_calibration_data(geo, start_calibration_year, end_calibration_ye
         calibration_data["wages_by_sector"] = wages_by_sector
     end
 
-    # sqlquery="SELECT value FROM '$(pqfile("nasa_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='MIO_EUR' AND sector='S11' AND na_item='F2' AND finpos='ASS' AND co_nco='NCO' ORDER BY time"
-    # calibration_data["firm_cash"]=execute(conn,sqlquery);
-
-    # old:
-    # sqlquery="SELECT value, time FROM '$(pqfile("nasq_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S11' AND na_item='F2' AND finpos='ASS' ORDER BY time"
-    # calibration_data["firm_cash_quarterly"]=fetch_(conn,sqlquery,calibration_data["quarters_num"]);
-    # new:
     sqlquery="SELECT value FROM '$(pqfile("nasq_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S11' AND na_item='F2' AND finpos='ASS' ORDER BY time"
     calibration_data["firm_cash_quarterly"]=execute(conn,sqlquery);
 
-    # sqlquery="SELECT value FROM '$(pqfile("nasa_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='MIO_EUR' AND sector='S11' AND na_item='F4' AND finpos='LIAB' AND co_nco='NCO' ORDER BY time"
-    # calibration_data["firm_debt"]=execute(conn,sqlquery);
-
-    # old:
-    # sqlquery="SELECT value, time FROM '$(pqfile("nasq_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S11' AND na_item='F4' AND finpos='LIAB' ORDER BY time"
-    # calibration_data["firm_debt_quarterly"]=fetch_(conn,sqlquery,calibration_data["quarters_num"]);
-    # new:
     sqlquery="SELECT value FROM '$(pqfile("nasq_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S11' AND na_item='F4' AND finpos='LIAB' ORDER BY time"
     calibration_data["firm_debt_quarterly"]=execute(conn,sqlquery);
 
@@ -112,18 +96,8 @@ function import_calibration_data(geo, start_calibration_year, end_calibration_ye
         @warn "Consolidated F4 data not available for $geo: $e"
     end
 
-    # sqlquery="SELECT value FROM '$(pqfile("nasa_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='MIO_EUR' AND sector='S14_S15' AND na_item='F2' AND finpos='ASS' AND co_nco='NCO' ORDER BY time"
-    # calibration_data["household_cash"]=execute(conn,sqlquery);
-
-    # old:
-    # sqlquery="SELECT value, time FROM '$(pqfile("nasq_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S14_S15' AND na_item='F2' AND finpos='ASS' ORDER BY time"
-    # calibration_data["household_cash_quarterly"]=fetch_(conn,sqlquery,calibration_data["quarters_num"]);
-    # new:
     sqlquery="SELECT value FROM '$(pqfile("nasq_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S14_S15' AND na_item='F2' AND finpos='ASS' ORDER BY time"
     calibration_data["household_cash_quarterly"]=execute(conn,sqlquery);
-
-    # sqlquery="SELECT value FROM '$(pqfile("nasa_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='MIO_EUR' AND sector='S121_S122_S123' AND na_item='F5' AND finpos='LIAB' AND co_nco='NCO' ORDER BY time"
-    # calibration_data["bank_equity"]=execute(conn,sqlquery);
 
     sqlquery1="SELECT value FROM '$(pqfile("nasq_10_f_bs"))' WHERE geo='$(geo)' AND time IN ($(quarters_str)) AND unit='MIO_EUR' AND sector='S121_S122_S123' AND na_item='F5' AND finpos='LIAB' ORDER BY time"
     all_monetary_institutions_equity = execute(conn, sqlquery1)
@@ -271,8 +245,6 @@ function import_calibration_data(geo, start_calibration_year, end_calibration_ye
     sqlquery="SELECT 1e3*value FROM '$(pqfile("nama_10_pe"))' WHERE geo='$(geo)' AND time IN ($(years_str)) AND unit='THS_PER' AND na_item='POP_NC' ORDER BY time"
     calibration_data["population"]=execute(conn,sqlquery);
 
-    # [calibration_data["firms"],calibration_data["employees"]]=number_of_agents(conn,geo,start_calibration_year:end_calibration_year);
-
     sqlquery="SELECT 1e3*value FROM '$(pqfile("nama_10_a64_e"))' WHERE nace_r2 IN (SELECT nace FROM '$(pqfile("nace64"))') and time IN ($(years_str)) AND geo='$(geo)' AND nace_r2 NOT IN ('T', 'U', 'L68A') AND unit = 'THS_PER' AND na_item='SAL_DC' ORDER BY time, nace_r2"
     calibration_data["employees"]=execute(conn,sqlquery);
     calibration_data["employees"]=reshape(calibration_data["employees"],(number_sectors,Int64(length(calibration_data["employees"])/number_sectors)));
@@ -309,7 +281,6 @@ function import_calibration_data(geo, start_calibration_year, end_calibration_ye
     ## Select only the relevant years from each of the datasets and append them
     ## to each other
     nace_r2_industries_subset = "('K64','K65','K66','P','Q86','Q87_Q88','R90-R92','R93','S94','S95','S96')"
-    # "SELECT time, nace_r2, value FROM (
     sqlquery= """
     SELECT value FROM (
     SELECT time, nace_r2, value AS value FROM '$(pqfile("sbs_na_sca_r2_a64"))'

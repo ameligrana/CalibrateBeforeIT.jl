@@ -1,5 +1,3 @@
-# module Import_Data
-
 function import_data(geo, start_year, end_year)
     conn = DBInterface.connect(DuckDB.DB)
     all_years = collect(start_year:end_year)
@@ -432,20 +430,12 @@ function import_data(geo, start_year, end_year)
     sqlquery="SELECT value FROM '$(pqfile("nama_10_pe"))' WHERE time IN ($(years_str)) AND geo='$(geo)' AND na_item='EMP_DC' AND unit='THS_PER' ORDER BY time"
     data["employed"] = execute(conn,sqlquery);
 
-    ## OR [2025-10-09 Do]: commented out, "employed_quarterly" is not used
-    ## anywhere
-    # Quarterly
-    # sqlquery="SELECT value FROM '$(pqfile("namq_10_pe"))' WHERE time IN ($(quarters_str)) AND geo='$(geo)' AND na_item='EMP_DC' AND unit='THS_PER' AND s_adj='SCA' ORDER BY time"
-    # data["employed_quarterly"]=execute(conn,sqlquery);
-
     if geo != "EA19"
         ## Unemployment rate
-        # sqlquery="SELECT value FROM '$(pqfile("une_rt_q_h"))' WHERE time IN ($(quarters_str)) AND geo='$(geo)' AND unit='PC_ACT' AND age='Y15-74' AND s_adj='SA' AND sex='T' ORDER BY time"
         sqlquery="SELECT value FROM '$(pqfile("une_rt_q"))' WHERE time IN ($(quarters_str)) AND geo='$(geo)' AND unit='PC_ACT' AND age='Y15-74' AND s_adj='SA' AND sex='T' ORDER BY time"
         data["unemployment_rate_quarterly"]=0.01*execute(conn,sqlquery);
 
         # Annual
-        # sqlquery="SELECT value FROM '$(pqfile("une_rt_a_h"))' WHERE time IN ($(years_str)) AND geo='$(geo)' AND unit='PC_ACT' AND age='Y15-74' AND sex='T' ORDER BY time"
         sqlquery="SELECT value FROM '$(pqfile("une_rt_a"))' WHERE time IN ($(years_str)) AND geo='$(geo)' AND unit='PC_ACT' AND age='Y15-74' AND sex='T' ORDER BY time"
         data["unemployment_rate"]=0.01*execute(conn,sqlquery);
 
@@ -503,19 +493,8 @@ function import_data(geo, start_year, end_year)
 
     data["nominal_nace10_gva_growth_quarterly"]=data["real_nace10_gva_growth_quarterly"]+data["nace10_gva_deflator_growth_quarterly"];
 
-    ##
-    ## Adjust length of time series
-    ##
-
-    # fields=fieldnames(data);
-    # for l=1:numel(fields)
-    #     eval(['p=length(data.',fields{l},');']);
-    #     if p == length(data.quarters_num)-1 || p == length(data.years_num)-1
-    #         eval(['data.',fields{l},'=[NaN*zeros(1,size(data.',fields{l},',2));data.',fields{l},"']);
-    #     end
-    # end
-    ## OR: Not sure if necessary to replicate in Julia. Let's wait until errors
-    ## are thrown:
+    ## The MATLAB original padded series that were one period too short with a
+    ## leading NaN. Not replicated here; fail loudly instead:
     for (key, value) in data
         data_length = length(value)
         if (data_length == length(data["years_num"]) - 1) || (data_length == length(data["quarters_num"]) - 1)
@@ -526,5 +505,3 @@ function import_data(geo, start_year, end_year)
 
     return data
 end
-
-# end
