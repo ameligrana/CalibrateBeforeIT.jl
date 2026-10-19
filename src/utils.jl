@@ -51,6 +51,9 @@ function extract_years(conn, table_id::String,
     return res_years
 end
 
+# NACE64 industries that are not part of the model
+const EXCLUDED_NACE64 = ["L68A", "T", "U"]
+
 # Quoted, comma-separated list for SQL `IN (...)` clauses
 sql_list(items)::String = join(["'$(item)'" for item in items], ", ")
 
